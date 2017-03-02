@@ -1,7 +1,3 @@
-## Part 1: Concept questions (6 points)
-
-The code that follows introduces a toy data set, decision tree model, and two prediction functions.
-```{r eval=T, message=F}
 library(dplyr)
 
 # synthetic depression data
@@ -20,6 +16,7 @@ tree = data.frame( # do not change "tree"
   odds = c(NA, NA, 0.1, 2, 3)
 )
 
+
 predictOddsOnDataSet = function(tree, data, active = 1) {
   apply(data, 1, (function(x) {predictedOdds(tree=tree, x, active=1)})  )
 }
@@ -30,43 +27,78 @@ predictedOdds = function(tree, datum, active = 1) {
     
     return(tree$odds[active])
     
-  } else {                                  # internal node of tree, so continue down tree to true/false child
+  } else {  # internal node of tree, so continue down tree to true/false child
     
-    if( (datum[[tree[active,"splitVariable"] %>% as.character]] %>% as.character) == tree[active,"split"])
-      return(predictedOdds(tree, datum, active = tree[active,trueChild]))
+    if((datum[[tree[active,"splitVariable"] %>% as.character]] %>% as.character) == tree[active,"split"]) {
+      
+      return(predictedOdds(tree, datum, active = tree[active,"trueChild"]))
     
-    else
-      return(predictedOdds(tree, datum, active = tree[active,falseChild]))
-    
+    } else {
+      
+      return(predictedOdds(tree, datum, active = tree[active,"falseChild"]))
+      
+    }
   }
-  
 }
 
-# goal: run predictOddsOnDataSet(tree, depressionData)
-```
+#added quotes to truchild and falsechild when setting the new active node
+odds = predictOddsOnDataSet(tree, depressionData)
+prob = odds/(odds+1)
 
-First, verify to yourself that, for the fourth patient in ```depressionData```, the tree should have output an odds of 0.1.
+data <- cbind(depressionData,prob) %>% tbl_df()
+data <- data %>% mutate(pred = prob > 0.5)
 
-Fix the function ```predictedOdds``` so that ```predictedOddsOnDataSet``` outputs the odds for each patient in data. Use the debugger functions like ```debugOnce(predictedOdds)``` or ```browser()``` to inspect the code. 
+data <- data[,c(3,5)]
 
-What did you change?
-[response required]
+tp = filter(data,hospitalized == TRUE & pred == TRUE) %>% nrow()
+fp = filter(data,hospitalized == FALSE & pred == TRUE) %>% nrow()
+fn = filter(data,hospitalized == TRUE & pred == FALSE) %>% nrow()
+tn = filter(data,hospitalized == FALSE & pred == FALSE) %>% nrow()
 
-Add a column of the predicted probabilities of hospitalization to depressionData. Display it.
-[response required]
+acc <- (tp + tn)/(tp+fp+fn+tn)
+sens <- tp/(tp+fn)
+spec <- fp/(fp+tn)
+prec <- tp/(tp+fp)
+recall <- sens
 
-Using a threshold probability of 0.5, what is:
-  
-  - the accuracy of the model?
-- the sensitivity of the model?
-- the specificity of the model?
-- the precision of the model?
-- the recall of the model?
+data.frame(acc,sens,spec,prec,recall)
 
-[responses required]  
+library("ggplot2")
 
-Suppose you want to know the prevalence of diabetes in Pittsburgh. If you randomly survey 10 Pittsburghers and 5 of them state they have diabetes:
-  
-  - what is the maximum likelihood estimate for the prevalence of diabetes?
-- given your strong belief specified by a beta prior of $\alpha = 11, \beta = 21$, what is the maximum a posteriori estimate for the prevalence of diabetes?
-[responses required]  
+MLE = function(pVector) {
+  p <- c()
+  y <- c()
+  for (i in pVector) {
+    result <- (i^5)*(1-i)^5
+    p <- c(p,i)
+    y <- c(y,result)
+  }
+  plotData <- data.frame(p,y)
+  maxY <- max(plotData$y)
+  maxP <- plotData %>% filter(y == maxY)
+  print(maxP)
+  ggplot(plotData,aes(x = p,y = y)) + geom_point()
+}
+
+pVector <- seq(0,1,0.01)
+
+MLE(pVector)
+
+MAP = function(pVector,alpha,beta) {
+  p <- c()
+  y <- c()
+  a <- 5 + (alpha - 1)
+  b <- 5 + (beta - 1)
+  for (i in pVector) {
+    result <- (i^a)*(1-i)^b
+    p <- c(p,i)
+    y <- c(y,result)
+  }
+  plotData <- data.frame(p,y)
+  maxY <- max(plotData$y)
+  maxP <- plotData %>% filter(y == maxY)
+  print(maxP)
+  ggplot(plotData,aes(x = p,y = y)) + geom_point()
+}
+
+MAP(pVector,11,21)
