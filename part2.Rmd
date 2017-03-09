@@ -14,30 +14,17 @@ knitr::opts_chunk$set(echo = TRUE)
 - **Y:** What was the definition of the primary outcome in this study?
 - What is (are) the variable name(s) for the outcome?
  
- > Death or dependency at 6 months
-   OCCODE, which stands for outcome code
+ > Death or dependency at 6 months. OCCODE, which stands for outcome code.
 
 - **U:** what is (are) the variable name(s) for the intervention, and what is (are) their possible values?
 
-> RXASP: Y/N
-> RXHEP: M/L/N
+> RXASP: Y/N, RXHEP: M/L/N
 
 - **V, W:** describe the covariates included and the population being studied.
 
-> Covariates (v): delay between stroke and randomization, conscious state at randomization, sex, age,
-       symptoms noted on waking, atrial fibrillation, CT before randomization, infarct visible on CT,
-       Heparin within 24 hours prior to randomization, aspirin within 3 days prior to randomization,
-       systolic blood pressure at randomization, body defecits, mental defecits, stroke subtype, treatments
-       in hospital
+> Covariates (v): They are demographics, health history, and physical signs such as body defecits. They include: delay between stroke and randomization, conscious state at randomization, sex, age, symptoms noted on waking, atrial fibrillation, CT before randomization, infarct visible on CT, Heparin within 24 hours prior to randomization, aspirin within 3 days prior to randomization, systolic blood pressure at randomization, body defecits, mental defecits, stroke subtype, treatments in hospital.
 
-> Population (w): Patients were eligible if there was evidence of an acute stroke (irrespective of severity) with onset less than 48 hours
-       previously, and if there was no evidence ofintracranial haemorrhage, and no clear indications for, or contraindications to,
-       heparin or aspirin. The fundamental criterion for eligibility was simply that the physician was uncertain whether or not
-       to administer either or both of the trial treatments to that particular patient. Possible reasons not to include a patient
-       were either only a small likelihood of worthwhile benefit or a high risk of adverse effects. At randomisation, 61% were aged
-       over 70, 23% had impaired consciousness and 16% were known to be in atrial fibrillation. 67% had had a CT scan before
-       randomisation (49% of these scans showed an infarction, no infarct lesion being visible in the remainder); a further 29%
-       were scanned after randomisation; and 4% never had a CT scan.
+> Population (w): At randomisation, 61% were aged over 70, 23% had impaired consciousness and 16% were known to be in atrial fibrillation. 67% had had a CT scan before randomisation (49% of these scans showed an infarction, no infarct lesion being visible in the remainder); a further 29% were scanned after randomisation; and 4% never had a CT scan. Patients were eligible if there was evidence of an acute stroke with onset less than 48 hours previously, and if there was no evidence ofintracranial haemorrhage, and no clear indications for, or contraindications to, heparin or aspirin. The fundamental criterion for eligibility was simply that the physician was uncertain whether or not to administer either or both of the trial treatments to that particular patient. Possible reasons not to include a patient were either only a small likelihood of worthwhile benefit or a high risk of adverse effects.
 
 - Construct a so-called Table 1 for groups of {aspirin, no aspirin} use, including information on age, gender, systolic blood pressure, and conscious state.
 
@@ -45,8 +32,6 @@ knitr::opts_chunk$set(echo = TRUE)
 library(dplyr)
 library(caret)
 library(missForest)
-#library(stringr)
-#library(mice)
 library(rpart)
 library(bnlearn)
 library(mlr)
@@ -67,7 +52,7 @@ table1 %>% tbl_df()
 ```
 
 #### Machine learning analysis
-# Note: for this analysis, use a simple 50-50 train-test split.
+Note: for this analysis, use a simple 50-50 train-test split.
 ```{r}
 data$OCCODE[data$OCCODE == 0|data$OCCODE == 9] <- NA # 0 and 9 are unknown outcomes
 data$OCCODE[data$OCCODE == 1|data$OCCODE == 2] <- 1  # 1 and 2 are dead and dependent 
@@ -318,7 +303,6 @@ nbPR = prediction(nbPredict$data$prob.1, nbPredict$data$truth) %>% performance("
 tan = tree.bayes(dTraining, "OCCODE")
 fittedTan = bn.fit(tan, dTraining)
 tanPredict <- predict(fittedTan, dTest,prob = TRUE)
-tanPredict
 
 tanResults = confusionMatrix(tanPredict,dTest$OCCODE,positive = "1")
 tanResults
