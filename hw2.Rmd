@@ -1,10 +1,13 @@
 ---
-title: "Machine Learning for Health Care: Homework 2"
-output:
-  html_document:
-  fig_width: 7
-fig_height: 5
+title: "HW2 part2"
+author: "Steve Sroba"
+date: "March 7, 2017"
+output: html_document
 ---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
 
 ## Overview
 Homework 2 is about applying what you have learned in class into analysis in R. You will draw from both your learning in lecture and discussion with the skills you are developing in the workshop sessions.
@@ -39,11 +42,11 @@ For this homework, you will use git. **To submit the homework, email me a link t
 
 Your git repository should contain at least two commits with useful comments on what has changed from the previous version(s). This should be visible when I type in ```git log```. The submission I will grade is at the HEAD revision unless specified otherwise in your email. Include your .Rmd file and your .html file solutions in the repository with your name and andrew ID.
 
-  
 ## Part 1: Concept questions (6 points)
 
 The code that follows introduces a toy data set, decision tree model, and two prediction functions.
-```{r eval=T, message=F}
+
+```{r echo=FALSE,message=FALSE}
 library(dplyr)
 
 # synthetic depression data
@@ -62,6 +65,7 @@ tree = data.frame( # do not change "tree"
   odds = c(NA, NA, 0.1, 2, 3)
 )
 
+
 predictOddsOnDataSet = function(tree, data, active = 1) {
   apply(data, 1, (function(x) {predictedOdds(tree=tree, x, active=1)})  )
 }
@@ -72,90 +76,437 @@ predictedOdds = function(tree, datum, active = 1) {
     
     return(tree$odds[active])
     
-  } else {                                  # internal node of tree, so continue down tree to true/false child
+  } else {  # internal node of tree, so continue down tree to true/false child
     
-    if( (datum[[tree[active,"splitVariable"] %>% as.character]] %>% as.character) == tree[active,"split"])
-      return(predictedOdds(tree, datum, active = tree[active,trueChild]))
+    if((datum[[tree[active,"splitVariable"] %>% as.character]] %>% as.character) == tree[active,"split"]) {
+      
+      return(predictedOdds(tree, datum, active = tree[active,"trueChild"]))
     
-    else
-      return(predictedOdds(tree, datum, active = tree[active,falseChild]))
-    
+    } else {
+      
+      return(predictedOdds(tree, datum, active = tree[active,"falseChild"]))
+      
+    }
   }
-  
 }
-
-# goal: run predictOddsOnDataSet(tree, depressionData)
 ```
-  
 First, verify to yourself that, for the fourth patient in ```depressionData```, the tree should have output an odds of 0.1.
 
 Fix the function ```predictedOdds``` so that ```predictedOddsOnDataSet``` outputs the odds for each patient in data. Use the debugger functions like ```debugOnce(predictedOdds)``` or ```browser()``` to inspect the code. 
 
 What did you change?
-[response required]
+
+> I added quotes to truchild and falsechild when setting the new active node
 
 Add a column of the predicted probabilities of hospitalization to depressionData. Display it.
-[response required]
 
-Using a threshold probability of 0.5, what is:
+```{r}
+odds = predictOddsOnDataSet(tree, depressionData)
+prob = odds/(odds+1)
 
-- the accuracy of the model?
-- the sensitivity of the model?
-- the specificity of the model?
-- the precision of the model?
-- the recall of the model?
+data <- cbind(depressionData,prob) %>% tbl_df()
+data
+```
 
-[responses required]  
-
-Suppose you want to know the prevalence of diabetes in Pittsburgh. If you randomly survey 10 Pittsburghers and 5 of them state they have diabetes:
-
-- what is the maximum likelihood estimate for the prevalence of diabetes?
-- given your strong belief specified by a beta prior of $\alpha = 11, \beta = 21$, what is the maximum a posteriori estimate for the prevalence of diabetes?
-[responses required]  
 
 ## Part 2: Analysis (9 points)
 
 #### Preliminaries
 - **Y:** What was the definition of the primary outcome in this study?
 - What is (are) the variable name(s) for the outcome?
+ 
+ > Death or dependency at 6 months. OCCODE, which stands for outcome code.
 
 - **U:** what is (are) the variable name(s) for the intervention, and what is (are) their possible values?
 
+> RXASP: Y/N, RXHEP: M/L/N
+
 - **V, W:** describe the covariates included and the population being studied.
 
-[responses required]
+> Covariates (v): They are demographics, health history, and physical signs such as body defecits. They include: delay between stroke and randomization, conscious state at randomization, sex, age, symptoms noted on waking, atrial fibrillation, CT before randomization, infarct visible on CT, Heparin within 24 hours prior to randomization, aspirin within 3 days prior to randomization, systolic blood pressure at randomization, body defecits, mental defecits, stroke subtype, treatments in hospital.
+
+> Population (w): At randomisation, 61% were aged over 70, 23% had impaired consciousness and 16% were known to be in atrial fibrillation. 67% had had a CT scan before randomisation (49% of these scans showed an infarction, no infarct lesion being visible in the remainder); a further 29% were scanned after randomisation; and 4% never had a CT scan. Patients were eligible if there was evidence of an acute stroke with onset less than 48 hours previously, and if there was no evidence ofintracranial haemorrhage, and no clear indications for, or contraindications to, heparin or aspirin. The fundamental criterion for eligibility was simply that the physician was uncertain whether or not to administer either or both of the trial treatments to that particular patient. Possible reasons not to include a patient were either only a small likelihood of worthwhile benefit or a high risk of adverse effects.
 
 - Construct a so-called Table 1 for groups of {aspirin, no aspirin} use, including information on age, gender, systolic blood pressure, and conscious state.
 
-[response required]
+```{r echo=FALSE,message=FALSE}
+library(dplyr)
+library(caret)
+library(missForest)
+library(rpart)
+library(bnlearn)
+library(mlr)
+library(ROCR)
+
+data = read.csv("IST_csv.csv")
+
+table1 <- data %>%
+  group_by(RXASP) %>%
+  summarize(count = n(), male = sum(SEX=="M"),female = sum(SEX=="F"), age = round(mean(AGE),2),
+            SBP = round(mean(RSBP),2),alert = sum(RCONSC=="F"),unconscious = sum(RCONSC=="U"),
+            drowsy = sum(RCONSC=="D"))
+
+colnames(table1) = c("Aspirin", "N", "Males", "Females", "Avg. Age", "Avg. Sys. BP",
+                     "Alert", "Unconscoius","Drowsy")
+
+table1 %>% tbl_df()
+```
 
 #### Machine learning analysis
 Note: for this analysis, use a simple 50-50 train-test split.
+```{r}
+data$OCCODE[data$OCCODE == 0|data$OCCODE == 9] <- NA # 0 and 9 are unknown outcomes
+data$OCCODE[data$OCCODE == 1|data$OCCODE == 2] <- 1  # 1 and 2 are dead and dependent 
+data$OCCODE[data$OCCODE == 3|data$OCCODE == 4] <- 0  # all other values not dead or dependent
+data[,"OCCODE"] <- as.factor(data$OCCODE)
+
+data = replace(data, data[,] == "", NA) 
+
+indexes = sample(1:nrow(data),size = 0.5*nrow(data))
+training <- data[indexes,]
+test <- data[-indexes,]
+```
 
 Let our outcome of interest be "dead or dependent at 6 months", i.e. so that we have a binary classification problem. What percent of patients are dead or dependent at 6 months in your train set and test set?
-[response required]
 
+```{r}
+trainDorD <- training %>% count(OCCODE) %>% filter(OCCODE==1)
+trainDorD <- 100*round(trainDorD$n/nrow(training),4)
+
+testDorD <- test %>% count(OCCODE) %>% filter(OCCODE==1)
+testDorD <- 100*round(testDorD$n/nrow(test),4)
+
+cat("Test % = ",testDorD,"  
+    \n")
+cat("Train % = ",trainDorD,"  
+    \n")
+
+```
 Choose which variables to include in your model. For example, remove variables for outcomes at 14 days (because if you are dead at 14 days you are certainly dead at 6 months). Moreover, you should remove all features measured after baseline if you want to make a prediction based on baseline data. Similarly, specific indicators of the outcome should also be removed, since those are measurements past the baseline that are not our outcome of interest. For these reasons, you will need to remove clusters of variables. Justify your approach.
-[response required]
 
+```{r}
+vars <- colnames(data)
+
+notRelevant = c(1,22:25,82,83)
+measuredAfterBaseline = c(28:65,71,77:81,84:87,89:93,104:112)
+indicatorsOfOutcome = c(66:70,72:76,88,94,96:103)
+
+varsRemoved <- c(notRelevant,measuredAfterBaseline, indicatorsOfOutcome)
+feats <- vars[-varsRemoved]
+
+
+cat("IRRELEVANT VARIABLES: ", vars[notRelevant],"
+    \n")
+
+
+cat("AFTER BASELINE: ", vars[measuredAfterBaseline],"  
+    \n")
+
+cat("INDICATORS OF OUTCOME: ",vars[indicatorsOfOutcome],"  
+    \n")
+
+```
+
+> I removed three groups of variables. I removed data such as the hospital number and date/time of randomization becuase I thought it was irrelevant for prediction. I removed the largest group of variables because it was related to the data recorded on the 14th day, meaning it was recorded after baseline, which is what I am predicting from. I removed all indicators of the outcome and kept OCCODE because it is a single variable that includes death and dependence at 6 months, and I did not want the others to affect my model.
+ 
 Of the remaining variables, decide whether to exclude variables with missing data, impute them, and/or use indicator variables. (Note that if you choose multiple imputation for some variables, you would need to pool the results when evaluating performance, however for homework you may just use the first imputed data set). Justify your approach.
-[response required]
+
+```{r}
+
+summarizeColumns(training[,feats])
+summarizeColumns(test[,feats])
+
+```
+
+> The variables with missing data are RATRIAL, RHEP24, RASP3 and the outcome OCCODE. The study said that RATRIAL was not recorded in the pilot, and analyzing the data, this is also the same for RASP3 as you can see from RATRIAL and RASP3 having the same amount of missing values. RHEP24 started to be recorded mid pilot. OCCODE is empty if the outcome was unknown. I've determined that these are all MNAR, so I will impute them and add indicator variables  equal to TRUE for cases where they were missing, and FALSE where they were not. I deciided to go with the missForest method because it is supposed to handle mixed data types well, and there are both continuous and categorical variables present in the data. I also changed instances of RXHEP = H to M because the study said that it was coded as H in the pilot, and then changed to M.
+
+```{r}
+imputeAndFixData <- function(data) {
+  
+  #RXHEP: M coded as H in pilot
+  data[,"RXHEP"] <- as.character(data$RXHEP)
+  data[,"RXHEP"][data$RXHEP == "H"] <- "M"
+  data[,"RXHEP"] <- as.factor(data$RXHEP)
+  
+  #RATRIAL, RASP3, RHEP24 MNAR, so indicator variables added
+  data <- data %>%
+    mutate(RATIND = (is.na(RATRIAL))) %>%
+    mutate(RASIND = (is.na(RASP3))) %>%
+    mutate(RHEPIND = (is.na(RHEP24)))
+  
+  data[,c("RATIND","RASIND","RHEPIND")] <- lapply(data[,c("RATIND","RASIND","RHEPIND")],factor)
+  feats <- c(feats,c("RATIND","RASIND","RHEPIND"))
+  
+  data <- data[,feats]
+  data <- as.data.frame(lapply(data, function (x) if (is.factor(x)) factor(x) else x)) #make sure correct levels for factors
+  
+  data <- missForest(data,maxiter=10,ntree=100,variablewise=TRUE)
+  data <- data$ximp
+  
+  return(data)
+}
+
+training <- imputeAndFixData(training)
+test <- imputeAndFixData(test)
+
+summarizeColumns(training)
+summarizeColumns(test)
+```
 
 Use the following machine learning algorithms: logistic regression, naive Bayes, Tree Augmented Naive Bayes, and decision tree (specify any parameters you set that are not the default). The packages that you may find useful here are: "glm", "bnlearn", and "rpart", but you may use others if desired. In a table, report the accuracy with 95% confidence intervals for each algorithm.
-[response required]
 
-Construct an ROC (receiver operating characteristic) curve for each model and overlay them on a graph using ggplot. Include a legend. Hint: you will find the package "ROCR" helpful (or you might try the package "precrec", but I have not tested it).
-[response required]
+# Logistic Regression
+> I discovered the mlr package that makes training, testing, tuning and predicting models extremely easy. For all algorithms (except TAN, because the package did not support it), I used 10 fold cross validation to analyze the accuracy on the the test data, and tuned the paramaters if possible to find the best model. I then built the model, tested, and calculated the relevant performance metrics.
 
-Construct a PR (precision recall) curve for each model. Include a legend.
-[response required]
+```{r warning=FALSE}
+
+lrTrainTask <- makeClassifTask(data=training,target = "OCCODE", positive = 1)
+lrTestTask <- makeClassifTask(data=test,target = "OCCODE",positive = 1)
+
+getTaskDescription(lrTrainTask)
+getTaskDescription(lrTestTask)
+
+getParamSet("classif.logreg")
+lrLearner <- makeLearner("classif.logreg",predict.type = "prob")
+lrLearner
+
+lrCV <- crossval(learner = lrLearner,task = lrTrainTask,iters = 10,stratify = TRUE, measures = acc,show.info = F)
+lrCV$measures.test
+lrCV$aggr
+
+lrModel <- train(lrLearner,lrTrainTask)
+getLearnerModel(lrModel)
+
+lrPredict <- predict(lrModel,lrTestTask)
+lrPredict
+
+lrResults = confusionMatrix(lrPredict$data$response,lrPredict$data$truth,positive = "1")
+lrResults
+
+lrCM = lrResults$table
+lrCM
+
+lrAcc = lrResults$overall[c(1,3,4)]
+lrAcc = data.frame(TestAcc = lrAcc[1], lowerCI = lrAcc[2], upperCI = lrAcc[3])
+lrAcc
+
+lrROC = prediction(lrPredict$data$prob.1, lrPredict$data$truth) %>% performance("tpr","fpr")
+lrPR = prediction(lrPredict$data$prob.1, lrPredict$data$truth) %>% performance("prec","rec")
+
+```
+
+# Decision Tree
+> By calling getPramSet for the rPart classifier, I saw that there were 10 possible parameters to tune. I chose to go with the first three: minsplit = min number observations in node for split to take place, minbucket = min number observations to keep in terminal nodes, and cp = complexity param, where lower means tree will learn more specific relations in data (overfitting). To tune these, I used the provided gridSearch function. I arbitrarily chose the upper and lower bounds based on the default values and constraints provided and chose to measure them with cross validation prediction accuracy. 
+
+```{r message=FALSE}
+dtTrainTask <- makeClassifTask(data=training,target = "OCCODE", positive = 1)
+dtTestTask <- makeClassifTask(data=test,target = "OCCODE",positive = 1)
+getParamSet("classif.rpart")
+
+dtLearner <- makeLearner("classif.rpart",predict.type = "prob")
+dtCv <- makeResampleDesc("CV",iters=10L)
+
+gridSearch <- makeParamSet(
+  
+  makeIntegerParam("minsplit",lower = 10, upper = 30),
+  makeIntegerParam("minbucket", lower = 1, upper = 20),
+  makeNumericParam("cp", lower = 0.01, upper = 0.5)
+  
+)
+
+#hypertune params
+tuneControl <- makeTuneControlGrid()
+
+dtTune <- tuneParams(learner = dtLearner, resampling = dtCv, task = dtTrainTask, par.set = gridSearch,
+                   control = tuneControl, measures = acc)
+
+dtParams <- dtTune$x
+dtParams
+
+dtCVacc <- dtTune$y
+dtCVacc
+
+#set best params
+setHyperPars(dtLearner,par.vals = dtParams)
+
+#train model
+dtModel <- train(dtLearner,dtTrainTask)
+getLearnerModel(dtModel)
+
+#predict on test
+dtPredict <- predict(dtModel,dtTestTask)
+dtPredict
+
+dtResults = confusionMatrix(dtPredict$data$response,dtPredict$data$truth,positive = "1")
+dtResults
+
+dtCM = dtResults$table
+dtCM
+
+dtAcc = dtResults$overall[c(1,3,4)]
+dtAcc = data.frame(TestAcc = dtAcc[1], lowerCI = dtAcc[2], upperCI = dtAcc[3])
+dtAcc
+
+dtROC = prediction(dtPredict$data$prob.1, dtPredict$data$truth) %>% performance("tpr","fpr")
+dtPR = prediction(dtPredict$data$prob.1, dtPredict$data$truth) %>% performance("prec","rec")
+
+```
+
+# naiveBayes
+> First I discretized the data. I also used 10 fold cross validation to analyze the accuracy on the the test data and the built the model, and then predicted on the test data. There were not any parameters to tune with the naiveBayes model as with the others.
+
+```{r}
+dData <- bind_rows(training,test)
+dData[,sapply(dData, is.integer)] = lapply(dData[,sapply(dData, is.integer)], as.numeric)
+dData = discretize(dData)
+dTraining = dData[1:nrow(training),]
+dTest = dData[-(1:nrow(training)),]
+
+# Build train and test tasks
+nbTrainTask <- makeClassifTask(data=dTraining,target = "OCCODE", positive = 1)
+nbTestTask <- makeClassifTask(data=dTest,target = "OCCODE",positive = 1)
+getParamSet("classif.naiveBayes")
+
+# Build learner
+nbLearner <- makeLearner("classif.naiveBayes",predict.type = "prob")
+
+# cross validation
+nbCV <- crossval(learner = nbLearner,task = nbTrainTask,iters = 10,stratify = TRUE,measures = acc,show.info = F)
+nbCV$measures.test
+nbCV$aggr
+
+#train model
+nbModel <- train(nbLearner,nbTrainTask)
+getLearnerModel(nbModel)
+
+#predict on test
+nbPredict <- predict(nbModel,nbTestTask)
+nbPredict
+
+nbResults = confusionMatrix(nbPredict$data$response,nbPredict$data$truth,positive = "1")
+nbResults
+
+nbCM = nbResults$table
+nbCM
+
+nbAcc = nbResults$overall[c(1,3,4)]
+nbAcc = data.frame(TestAcc = nbAcc[1], lowerCI = nbAcc[2], upperCI = nbAcc[3])
+nbAcc
+
+nbROC = prediction(nbPredict$data$prob.1, nbPredict$data$truth) %>% performance("tpr","fpr")
+nbPR = prediction(nbPredict$data$prob.1, nbPredict$data$truth) %>% performance("prec","rec")
+```
+# TAN
+> TAN is not supported for the mlr package I have been using.
+
+```{r}
+
+tan = tree.bayes(dTraining, "OCCODE")
+fittedTan = bn.fit(tan, dTraining)
+tanPredict <- predict(fittedTan, dTest,prob = TRUE)
+
+tanResults = confusionMatrix(tanPredict,dTest$OCCODE,positive = "1")
+tanResults
+
+tanCM = tanResults$table
+tanCM
+
+tanAcc = tanResults$overall[c(1,3,4)]
+tanAcc = data.frame(TestAcc = tanAcc[1], lowerCI = tanAcc[2], upperCI = tanAcc[3])
+tanAcc
+
+tanProb = tanPredict %>% attr("prob")
+positiveIndexes = seq(2,length(tanProb),2)
+tanProb = tanProb[positiveIndexes]
+
+tanROC = prediction(tanProb, dTest$OCCODE) %>% performance("tpr","fpr")
+tanPR = prediction(tanProb, dTest$OCCODE) %>% performance("prec","rec")
+
+```
+
+Construct an ROC (receiver operating characteristic) curve for each model and overlay
+them on a graph using ggplot. Include a legend.
+
+
+```{r message=FALSE,warning=FALSE}
+rocList = list(lr = data.frame(y = lrROC@y.values[[1]],x = lrROC@x.values[[1]]),
+               dt = data.frame(y = dtROC@y.values[[1]],x = dtROC@x.values[[1]]),
+                 nb = data.frame(y = nbROC@y.values[[1]],x = nbROC@x.values[[1]]),
+                 tan = data.frame(y = tanROC@y.values[[1]],x = tanROC@x.values[[1]]))
+
+prList = list(lr = data.frame(y = lrPR@y.values[[1]],x = lrPR@x.values[[1]]),
+               dt = data.frame(y = dtPR@y.values[[1]],x = dtPR@x.values[[1]]),
+               nb = data.frame(y = nbPR@y.values[[1]],x = nbPR@x.values[[1]]),
+               tan = data.frame(y = tanPR@y.values[[1]],x = tanPR@x.values[[1]]))
+
+ggdisplay = function(data,title,xlab,ylab) {
+  
+  ggplot(data$lr, aes(x=x,y=y)) + geom_line(aes(color="LR")) +
+    geom_line(data=data$dt,aes(color="DT")) +
+    geom_line(data=data$nb,aes(color="NB")) +
+    geom_line(data=data$tan,aes(color="TAN")) + 
+  coord_cartesian(xlim=c(0,1),ylim=c(0,1)) +
+    xlab(xlab) + ylab(ylab) +
+    ggtitle(title) +
+    theme(legend.title = element_blank())
+
+}
+
+ggdisplay(rocList, title="ROC", xlab = "fpr", ylab = "tpr")
+ggdisplay(prList, title="PR", xlab = "prec", ylab = "rec")
+```
 
 #### Conclusions
 Let's draw conclusions from this study. Specifically,
 
-- how well are we able to predict death or dependence at 6 months? [response required]
-- what is the average treatment effect of aspirin on death or dependence at 6 months? Is aspirin significantly better than the alternative? [response required]
-- of the algorithms tested, which algorithms perform the best? Justify your statement.
-[response required]
+- how well are we able to predict death or dependence at 6 months?
 
-Congratulations, you've conducted a comparison of machine learning algorithms for mortality prediction! Commit your solutions to your git repository with an informative comment. ```git push``` will help you upload it to the cloud service you choose to use (github, bitbucket, etc).
+```{r}
+
+accTbl = rbind(LR = lrAcc,DT = dtAcc,NB = nbAcc,TAN = tanAcc)
+accTbl
+
+```
+
+> We are able to predict death or dependency at 6 months with an accuracy of ~70% for all models.
+
+- what is the average treatment effect of aspirin on death or dependence at 6 months? Is aspirin significantly better than the alternative?
+
+$Aspirin ATE = P(OCCODE = 1|RXASP = Y) - P(OCCODE = 1|RXASP = N)$
+
+$Heparin ATE = P(OCCODE = 1|RXHEP = H/M/L) - P(OCCODE = 1|RXHEP = N)$
+
+```{r}
+
+asp = data %>% count(RXASP, dORd = OCCODE == 1) %>%
+  mutate(p = n/sum(n)) %>%
+  filter(dORd == TRUE)
+
+hep = data %>% count(RXHEP, dORd = OCCODE == 1) %>%
+  mutate(p = n/sum(n)) %>%
+  filter(dORd == TRUE)
+
+asp
+hep
+
+aspATE = asp[2,4] - asp[1,4]
+hepATE = (hep[1,4]+hep[2,4]+hep[3,4])/3 - hep[4,4]
+
+cat("aspirin ATE = ", aspATE$p, "  
+    \n")
+cat("heparin ATE = ", hepATE$p, "  
+    \n")
+  
+```
+
+> Aspirin's ATE was -0.0132, which is better than heparins ATE of -0.0177. Neither is a good ATE.
+
+- of the algorithms tested, which algorithms perform the best? Justify your statement.
+
+```{r}
+
+accTbl
+
+```
+
+ > Going back to the accuracy table, the best was logistic regression, followed by TAN, decision tree, and naive bayes, although they were all close and accuracy is not the best way to compare methods. Looking at the ROC curve, logistic regression agin performed the best, while TAN and naive bayes were similar, and decision tree was clearly thr worst. This is also the same order for the PR curve. The PR curve showed that there was a large inbalance in the outcome variable, so in the future I would make sure to balance the outcome more in training and test sets. Taking all of this into account, I would say that logistic regression performed the best, while decision tree perfromed the worst.
